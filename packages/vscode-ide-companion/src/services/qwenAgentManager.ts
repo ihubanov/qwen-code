@@ -1448,9 +1448,7 @@ export class QwenAgentManager {
   /**
    * Register callback for available skills updates (from ACP available_skills_update)
    */
-  onAvailableSkills(
-    callback: (skills: Array<{ name: string; description: string }>) => void,
-  ): void {
+  onAvailableSkills(callback: (skills: string[]) => void): void {
     this.callbacks.onAvailableSkills = callback;
     this.sessionUpdateHandler.updateCallbacks(this.callbacks);
   }
