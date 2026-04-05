@@ -16,6 +16,7 @@ import type {
   PermissionResponseMessage,
   AskUserQuestionResponseMessage,
 } from '../../types/webviewMessageTypes.js';
+import type { AvailableCommand } from '../../types/chatTypes.js';
 import { PanelManager, getLocalResourceRoots } from './PanelManager.js';
 import { MessageHandler } from './MessageHandler.js';
 import { WebViewContent } from './WebViewContent.js';
@@ -46,6 +47,8 @@ export class WebViewProvider {
   // Track current ACP mode id to influence permission/diff behavior
   private currentModeId: ApprovalModeValue | null = null;
   private authState: boolean | null = null;
+  /** Cached available commands for re-sending on webview ready */
+  private cachedAvailableCommands: AvailableCommand[] | null = null;
   /** Cached available skills for re-sending on webview ready */
   private cachedAvailableSkills: string[] | null = null;
   /** Cached available models for re-sending on webview ready */
@@ -192,6 +195,7 @@ export class WebViewProvider {
 
     // Surface available commands (from ACP available_commands_update)
     this.agentManager.onAvailableCommands((commands) => {
+      this.cachedAvailableCommands = commands;
       this.sendMessageToWebView({
         type: 'availableCommands',
         data: { commands },
@@ -1273,6 +1277,13 @@ export class WebViewProvider {
       this.sendMessageToWebView({
         type: 'availableSkills',
         data: { skills: this.cachedAvailableSkills },
+      });
+    }
+
+    if (this.cachedAvailableCommands !== null) {
+      this.sendMessageToWebView({
+        type: 'availableCommands',
+        data: { commands: this.cachedAvailableCommands },
       });
     }
 
