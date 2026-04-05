@@ -46,6 +46,8 @@ export class WebViewProvider {
   // Track current ACP mode id to influence permission/diff behavior
   private currentModeId: ApprovalModeValue | null = null;
   private authState: boolean | null = null;
+  /** Cached available skills for re-sending on webview ready */
+  private cachedAvailableSkills: string[] | null = null;
   /** Cached available models for re-sending on webview ready */
   private cachedAvailableModels: ModelInfo[] | null = null;
   /** Model to apply once a new editor-tab session is initialized */
@@ -198,6 +200,7 @@ export class WebViewProvider {
 
     // Surface available skills for the /skills secondary picker
     this.agentManager.onAvailableSkills((skills) => {
+      this.cachedAvailableSkills = skills;
       this.sendMessageToWebView({
         type: 'availableSkills',
         data: { skills },
@@ -1263,6 +1266,13 @@ export class WebViewProvider {
       this.sendMessageToWebView({
         type: 'modeChanged',
         data: { modeId: this.currentModeId },
+      });
+    }
+
+    if (this.cachedAvailableSkills !== null) {
+      this.sendMessageToWebView({
+        type: 'availableSkills',
+        data: { skills: this.cachedAvailableSkills },
       });
     }
 
