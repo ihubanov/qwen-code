@@ -28,6 +28,7 @@ import {
   createContext,
   useContext,
   useCallback,
+  useEffect,
   useMemo,
   useState,
 } from 'react';
@@ -188,6 +189,17 @@ export function BackgroundAgentViewProvider({
   const closeDetail = useCallback(() => {
     setDetailOpenFor(null);
   }, []);
+
+  // Keep the currently-open detail agent out of the unread set. Without
+  // this, an agent that transitions to a terminal state while its detail
+  // is being viewed would get re-marked unread by the registry status
+  // callback, surfacing a fresh dot as soon as the user closes the pane —
+  // even though they just watched the completion live.
+  useEffect(() => {
+    if (detailOpenFor && unread.has(detailOpenFor)) {
+      clearUnread(detailOpenFor);
+    }
+  }, [detailOpenFor, unread, clearUnread]);
 
   const state: BackgroundAgentViewState = useMemo(
     () => ({

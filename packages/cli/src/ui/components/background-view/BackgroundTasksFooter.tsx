@@ -105,11 +105,23 @@ export const BackgroundTasksFooter: React.FC = () => {
   const { rows: terminalRows } = useTerminalSize();
 
   // Overflow: cap the visible rows to ~1/4 of the terminal height.
-  // If the list exceeds the cap, show the first (cap-1) rows and a
-  // synthetic overflow line indicating how many more are hidden.
+  // When the list overflows, reserve the last visible line for the
+  // "…and N more" indicator and scroll a window so the selected row is
+  // always inside the visible slice — otherwise Enter would open an
+  // off-screen task and no row would appear highlighted.
   const rowCap = Math.max(3, Math.floor(terminalRows / 4));
   const overflowing = entries.length > rowCap;
-  const visibleRows = overflowing ? entries.slice(0, rowCap - 1) : entries;
+  const windowSize = overflowing ? rowCap - 1 : entries.length;
+  const windowStart = overflowing
+    ? Math.max(
+        0,
+        Math.min(
+          entries.length - windowSize,
+          selectedIndex - Math.floor(windowSize / 2),
+        ),
+      )
+    : 0;
+  const visibleRows = entries.slice(windowStart, windowStart + windowSize);
   const overflowCount = overflowing ? entries.length - visibleRows.length : 0;
 
   useKeypress(
@@ -157,7 +169,8 @@ export const BackgroundTasksFooter: React.FC = () => {
   return (
     <Box flexDirection="column" paddingX={1}>
       {visibleRows.map((entry, idx) => {
-        const isSelected = footerFocused && idx === selectedIndex;
+        const absoluteIdx = idx + windowStart;
+        const isSelected = footerFocused && absoluteIdx === selectedIndex;
         const isUnread = unread.has(entry.agentId);
         const { symbol, color } = glyphFor(entry);
         const label = buildEntryLabel(entry);
