@@ -363,6 +363,78 @@ describe('BackgroundTaskRegistry', () => {
     expect(cb).not.toHaveBeenCalled();
   });
 
+  it('appendActivity builds a rolling buffer capped at 5', () => {
+    registry.register({
+      agentId: 'a',
+      description: 'agent a',
+      status: 'running',
+      startTime: Date.now(),
+      abortController: new AbortController(),
+    });
+
+    for (let i = 0; i < 7; i++) {
+      registry.appendActivity('a', {
+        name: `Tool${i}`,
+        description: `call ${i}`,
+        at: i,
+      });
+    }
+
+    const activities = registry.get('a')!.recentActivities ?? [];
+    expect(activities.map((a) => a.name)).toEqual([
+      'Tool2',
+      'Tool3',
+      'Tool4',
+      'Tool5',
+      'Tool6',
+    ]);
+  });
+
+  it('appendActivity no-ops after the agent terminates', () => {
+    registry.register({
+      agentId: 'a',
+      description: 'agent a',
+      status: 'running',
+      startTime: Date.now(),
+      abortController: new AbortController(),
+    });
+
+    registry.complete('a', 'done');
+    registry.appendActivity('a', { name: 'Late', description: 'x', at: 99 });
+
+    expect(registry.get('a')!.recentActivities ?? []).toHaveLength(0);
+  });
+
+  it('appendActivity fires the statusChange callback so UI can re-render', () => {
+    const cb = vi.fn();
+    registry.setStatusChangeCallback(cb);
+
+    registry.register({
+      agentId: 'a',
+      description: 'agent a',
+      status: 'running',
+      startTime: Date.now(),
+      abortController: new AbortController(),
+    });
+    cb.mockClear();
+
+    registry.appendActivity('a', { name: 'T', description: 'd', at: 0 });
+    expect(cb).toHaveBeenCalledOnce();
+    expect(cb.mock.calls[0][0].agentId).toBe('a');
+  });
+
+  it('stores prompt verbatim on the entry', () => {
+    registry.register({
+      agentId: 'a',
+      description: 'agent a',
+      status: 'running',
+      startTime: Date.now(),
+      abortController: new AbortController(),
+      prompt: 'Run sleep 30 and report done.',
+    });
+    expect(registry.get('a')!.prompt).toBe('Run sleep 30 and report done.');
+  });
+
   it('escapes XML metacharacters in interpolated fields', () => {
     const callback = vi.fn();
     registry.setNotificationCallback(callback);

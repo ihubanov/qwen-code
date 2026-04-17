@@ -1038,12 +1038,23 @@ class AgentToolInvocation extends BaseToolInvocation<AgentParams, ToolResult> {
           startTime: Date.now(),
           abortController: bgAbortController,
           toolUseId: this.callId,
-          // Exposes the agent's observable surface (message history, live
-          // tool outputs, event emitter) to TUI consumers — the background
-          // agent UI footer reads this to render a detail view without
-          // needing to cross the AgentHeadless boundary.
-          core: bgSubagent.getCore(),
+          prompt: this.params.prompt,
         });
+
+        // Subscribe to the subagent's tool-call event stream so the
+        // detail dialog's Progress section reflects live activity. We
+        // capture the unsubscribe fn and call it when the agent
+        // terminates (success, failure, or cancel) to avoid holding the
+        // event emitter after the agent is gone.
+        const bgEmitter = bgSubagent.getCore().getEventEmitter();
+        const onToolCall = (event: AgentToolCallEvent) => {
+          registry.appendActivity(hookOpts.agentId, {
+            name: event.name,
+            description: event.description,
+            at: event.timestamp,
+          });
+        };
+        bgEmitter?.on(AgentEventType.TOOL_CALL, onToolCall);
 
         const getCompletionStats = () => {
           const summary = bgSubagent.getExecutionSummary();
@@ -1093,6 +1104,8 @@ class AgentToolInvocation extends BaseToolInvocation<AgentParams, ToolResult> {
             debugLogger.error(`[Agent] Background agent failed: ${errorMsg}`);
 
             registry.fail(hookOpts.agentId, errorMsg, getCompletionStats());
+          } finally {
+            bgEmitter?.off(AgentEventType.TOOL_CALL, onToolCall);
           }
         };
         void (isFork ? runInForkContext(bgBody) : bgBody());

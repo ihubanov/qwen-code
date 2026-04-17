@@ -15,32 +15,18 @@ import { BtwMessage } from '../components/messages/BtwMessage.js';
 import { AgentTabBar } from '../components/agent-view/AgentTabBar.js';
 import { AgentChatView } from '../components/agent-view/AgentChatView.js';
 import { AgentComposer } from '../components/agent-view/AgentComposer.js';
-import { BackgroundTasksFooter } from '../components/background-view/BackgroundTasksFooter.js';
-import { BackgroundTaskDetailView } from '../components/background-view/BackgroundTaskDetailView.js';
 import { useUIState } from '../contexts/UIStateContext.js';
 import { useUIActions } from '../contexts/UIActionsContext.js';
 import { useAgentViewState } from '../contexts/AgentViewContext.js';
-import { useBackgroundAgentViewState } from '../contexts/BackgroundAgentViewContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-
-// Below this height, the detail view takes over the whole viewport
-// instead of stacking under the parent conversation — a split squeezes
-// the parent into uselessness on short terminals.
-const DETAIL_SPLIT_MIN_ROWS = 30;
 
 export const DefaultAppLayout: React.FC = () => {
   const uiState = useUIState();
   const { refreshStatic } = useUIActions();
   const { activeView, agents } = useAgentViewState();
-  const { entries: bgEntries, detailOpenFor } = useBackgroundAgentViewState();
-  const { columns: terminalWidth, rows: terminalRows } = useTerminalSize();
+  const { columns: terminalWidth } = useTerminalSize();
   const hasAgents = agents.size > 0;
-  const hasBgAgents = bgEntries.length > 0;
   const isAgentTab = activeView !== 'main' && agents.has(activeView);
-
-  // Responsive decision for the background detail overlay.
-  const bgDetailOpen = !!detailOpenFor;
-  const bgDetailFullSwap = bgDetailOpen && terminalRows < DETAIL_SPLIT_MIN_ROWS;
 
   // Clear terminal on view switch so previous view's <Static> output
   // is removed. refreshStatic clears the terminal and bumps the
@@ -53,30 +39,6 @@ export const DefaultAppLayout: React.FC = () => {
       refreshStatic();
     }
   }, [activeView, refreshStatic]);
-
-  // Same treatment for the full-swap detail overlay. Entering full-swap
-  // replaces Ink's live tree with the detail panel only, but previously
-  // printed <Static> lines from the parent conversation (MainContent)
-  // or the agent transcript (AgentChatContent) remain in the terminal's
-  // scrollback / topmost viewport rows and visually leak into what is
-  // supposed to be a dedicated detail screen. Exiting does the reverse.
-  const prevFullSwapRef = useRef(bgDetailFullSwap);
-  useEffect(() => {
-    if (prevFullSwapRef.current !== bgDetailFullSwap) {
-      prevFullSwapRef.current = bgDetailFullSwap;
-      refreshStatic();
-    }
-  }, [bgDetailFullSwap, refreshStatic]);
-
-  // Full-swap: detail view covers the whole viewport, composer and
-  // parent conversation are hidden until the user hits Esc.
-  if (bgDetailFullSwap) {
-    return (
-      <Box flexDirection="column" width={terminalWidth}>
-        <BackgroundTaskDetailView />
-      </Box>
-    );
-  }
 
   return (
     <Box flexDirection="column" width={terminalWidth}>
@@ -121,18 +83,6 @@ export const DefaultAppLayout: React.FC = () => {
             <ExitWarning />
           </Box>
         </>
-      )}
-
-      {/* Background agent detail view (split layout). Stacked directly
-          below the composer so the parent conversation remains visible
-          above. The full-swap branch above handles short terminals. */}
-      {bgDetailOpen && <BackgroundTaskDetailView />}
-
-      {/* Background task footer. Hidden while the detail view is open
-          (split or full-swap) so the footer doesn't duplicate the row
-          whose detail is being shown. */}
-      {hasBgAgents && !bgDetailOpen && !uiState.dialogsVisible && (
-        <BackgroundTasksFooter />
       )}
 
       {/* Tab bar: visible whenever in-process agents exist and input is active */}

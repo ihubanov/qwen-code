@@ -44,6 +44,8 @@ import { MCPManagementDialog } from './mcp/MCPManagementDialog.js';
 import { HooksManagementDialog } from './hooks/HooksManagementDialog.js';
 import { SessionPicker } from './SessionPicker.js';
 import { MemoryDialog } from './MemoryDialog.js';
+import { BackgroundTasksDialog } from './background-view/BackgroundTasksDialog.js';
+import { useBackgroundAgentViewState } from '../contexts/BackgroundAgentViewContext.js';
 
 interface DialogManagerProps {
   addItem: UseHistoryManagerReturn['addItem'];
@@ -60,6 +62,7 @@ export const DialogManager = ({
 
   const uiState = useUIState();
   const uiActions = useUIActions();
+  const { dialogOpen: bgTasksDialogOpen } = useBackgroundAgentViewState();
   const { constrainHeight, terminalHeight, staticExtraHeight, mainAreaWidth } =
     uiState;
 
@@ -381,6 +384,15 @@ export const DialogManager = ({
         onCancel={uiActions.closeResumeDialog}
       />
     );
+  }
+
+  // Background tasks dialog — lowest priority so other dialogs
+  // (permissions, trust prompts, auth, etc.) always take precedence. The
+  // dialog is part of the shared dialogsVisible machinery (see
+  // AppContainer) so its visibility mutes the composer and the global
+  // Ctrl+C / Esc handlers route through `closeAnyOpenDialog`.
+  if (bgTasksDialogOpen) {
+    return <BackgroundTasksDialog />;
   }
 
   return null;

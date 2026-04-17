@@ -6,29 +6,27 @@
 
 /**
  * @fileoverview BackgroundAgentViewContext — React state for the
- * background-agent footer and responsive detail view.
+ * Background tasks dialog.
  *
- * Holds:
- *   - the live snapshot of `BackgroundAgentEntry[]`,
- *   - the currently selected footer row,
- *   - the unread set (terminal-state agents the user hasn't viewed yet),
- *   - the detail-open target (agentId whose detail view is rendered),
- *   - the footer-focused flag used by keyboard routing.
+ * The dialog is a single overlay with two internal modes:
+ *   - `list`: sectioned list of running and completed background agents
+ *   - `detail`: compact per-agent detail (Progress + Prompt + Error)
  *
- * Parallel to `AgentViewContext` (team / Arena agents), but simpler —
- * no per-agent composer state, no tabs, no approval modes. Background
- * agents are read-only observables.
+ * State carried here:
+ *   - live snapshot of `BackgroundAgentEntry[]` (from the registry)
+ *   - whether the overlay is mounted (`dialogOpen`)
+ *   - which internal mode is active (`dialogMode`)
+ *   - which row is focused (`selectedIndex`)
  *
- * The subscription plumbing (registry → entries, per-entry event
- * emitter → re-render) lives in `useBackgroundAgentView`, invoked once
- * inside the provider so the provider is the sole owner of lifecycle.
+ * The subscription plumbing (registry callbacks → entries) lives in
+ * `useBackgroundAgentView`, invoked once inside the provider so it owns
+ * the single-slot `setStatusChangeCallback` for the TUI's lifetime.
  */
 
 import {
   createContext,
   useContext,
   useCallback,
-  useEffect,
   useMemo,
   useState,
 } from 'react';
@@ -40,17 +38,17 @@ import { useBackgroundAgentView } from '../hooks/useBackgroundAgentView.js';
 
 // ─── Types ──────────────────────────────────────────────────
 
+export type BackgroundDialogMode = 'list' | 'detail';
+
 export interface BackgroundAgentViewState {
   /** Live snapshot of every background agent entry, ordered by startTime. */
   entries: readonly BackgroundAgentEntry[];
   /** Index into `entries` for the currently focused row (0-based). */
   selectedIndex: number;
-  /** agentId of the entry whose detail view is open; null when closed. */
-  detailOpenFor: string | null;
-  /** agentIds of entries that have reached a terminal state without being viewed. */
-  unread: ReadonlySet<string>;
-  /** Whether the footer has keyboard focus (vs. composer or AgentTabBar). */
-  footerFocused: boolean;
+  /** Whether the Background tasks overlay is mounted. */
+  dialogOpen: boolean;
+  /** Which internal mode the overlay is rendering. */
+  dialogMode: BackgroundDialogMode;
 }
 
 export interface BackgroundAgentViewActions {
@@ -60,14 +58,14 @@ export interface BackgroundAgentViewActions {
   moveSelectionUp(): boolean;
   /** Move selection down by one; clamps at entries.length-1. Returns `true` if moved. */
   moveSelectionDown(): boolean;
-  /** Open the detail view. Defaults to the currently-selected entry. */
-  openDetail(agentId?: string): void;
-  /** Close the detail view. */
-  closeDetail(): void;
-  /** Clear the unread marker for a specific agentId. */
-  markRead(agentId: string): void;
-  /** Update footer focus state (used by keyboard routing). */
-  setFooterFocused(focused: boolean): void;
+  /** Open the dialog in list mode. */
+  openDialog(): void;
+  /** Close the dialog regardless of mode. */
+  closeDialog(): void;
+  /** Enter detail mode for the currently selected entry. */
+  enterDetail(): void;
+  /** Return from detail mode to list mode. */
+  exitDetail(): void;
 }
 
 // ─── Context ────────────────────────────────────────────────
@@ -82,9 +80,8 @@ export const BackgroundAgentViewActionsContext =
 const DEFAULT_STATE: BackgroundAgentViewState = {
   entries: [],
   selectedIndex: 0,
-  detailOpenFor: null,
-  unread: new Set(),
-  footerFocused: false,
+  dialogOpen: false,
+  dialogMode: 'list',
 };
 
 const noop = () => {};
@@ -94,10 +91,10 @@ const DEFAULT_ACTIONS: BackgroundAgentViewActions = {
   setSelectedIndex: noop,
   moveSelectionUp: noopBool,
   moveSelectionDown: noopBool,
-  openDetail: noop,
-  closeDetail: noop,
-  markRead: noop,
-  setFooterFocused: noop,
+  openDialog: noop,
+  closeDialog: noop,
+  enterDetail: noop,
+  exitDetail: noop,
 };
 
 // ─── Hooks ──────────────────────────────────────────────────
@@ -121,21 +118,16 @@ export function BackgroundAgentViewProvider({
   config,
   children,
 }: BackgroundAgentViewProviderProps) {
-  // Entries + unread are driven by the registry subscription in
-  // useBackgroundAgentView. Local React state holds the UI concerns:
-  // selection index, detail-open target, focus flag.
-  const { entries, unread, clearUnread } = useBackgroundAgentView(
-    config ?? null,
-  );
+  // Entries are driven by the registry subscription in
+  // useBackgroundAgentView. Local React state holds the overlay concerns.
+  const { entries } = useBackgroundAgentView(config ?? null);
 
   const [rawSelectedIndex, setRawSelectedIndex] = useState(0);
-  const [detailOpenFor, setDetailOpenFor] = useState<string | null>(null);
-  const [footerFocused, setFooterFocused] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState<BackgroundDialogMode>('list');
 
   // Single clamp on read — `rawSelectedIndex` can fall out of range when
-  // entries shrink between renders. Callers that mutate it pre-clamp,
-  // but external resizes (e.g. an agent finishing and being filtered out)
-  // happen outside callback control.
+  // entries shrink between renders.
   const selectedIndex =
     entries.length === 0
       ? 0
@@ -162,54 +154,33 @@ export function BackgroundAgentViewProvider({
     return true;
   }, [entries.length, selectedIndex]);
 
-  const markRead = useCallback(
-    (agentId: string) => {
-      clearUnread(agentId);
-    },
-    [clearUnread],
-  );
-
-  const openDetail = useCallback(
-    (agentId?: string) => {
-      if (entries.length === 0) return;
-      const target = agentId ?? entries[selectedIndex]?.agentId ?? null;
-      if (!target) return;
-      setDetailOpenFor(target);
-      clearUnread(target);
-      // Release footer focus while the detail overlay owns the screen.
-      // The footer is unmounted by the layout while detail is open, so
-      // leaving `footerFocused` stale would trap composer keystrokes —
-      // `InputPrompt` blocks non-printable keys whenever either footer
-      // is focused. The detail view re-sets it on Esc.
-      setFooterFocused(false);
-    },
-    [entries, selectedIndex, clearUnread],
-  );
-
-  const closeDetail = useCallback(() => {
-    setDetailOpenFor(null);
+  const openDialog = useCallback(() => {
+    setDialogOpen(true);
+    setDialogMode('list');
   }, []);
 
-  // Keep the currently-open detail agent out of the unread set. Without
-  // this, an agent that transitions to a terminal state while its detail
-  // is being viewed would get re-marked unread by the registry status
-  // callback, surfacing a fresh dot as soon as the user closes the pane —
-  // even though they just watched the completion live.
-  useEffect(() => {
-    if (detailOpenFor && unread.has(detailOpenFor)) {
-      clearUnread(detailOpenFor);
-    }
-  }, [detailOpenFor, unread, clearUnread]);
+  const closeDialog = useCallback(() => {
+    setDialogOpen(false);
+    setDialogMode('list');
+  }, []);
+
+  const enterDetail = useCallback(() => {
+    if (entries.length === 0) return;
+    setDialogMode('detail');
+  }, [entries.length]);
+
+  const exitDetail = useCallback(() => {
+    setDialogMode('list');
+  }, []);
 
   const state: BackgroundAgentViewState = useMemo(
     () => ({
       entries,
       selectedIndex,
-      detailOpenFor,
-      unread,
-      footerFocused,
+      dialogOpen,
+      dialogMode,
     }),
-    [entries, selectedIndex, detailOpenFor, unread, footerFocused],
+    [entries, selectedIndex, dialogOpen, dialogMode],
   );
 
   const actions: BackgroundAgentViewActions = useMemo(
@@ -217,18 +188,19 @@ export function BackgroundAgentViewProvider({
       setSelectedIndex,
       moveSelectionUp,
       moveSelectionDown,
-      openDetail,
-      closeDetail,
-      markRead,
-      setFooterFocused,
+      openDialog,
+      closeDialog,
+      enterDetail,
+      exitDetail,
     }),
     [
       setSelectedIndex,
       moveSelectionUp,
       moveSelectionDown,
-      openDetail,
-      closeDetail,
-      markRead,
+      openDialog,
+      closeDialog,
+      enterDetail,
+      exitDetail,
     ],
   );
 

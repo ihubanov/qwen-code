@@ -1427,11 +1427,13 @@ describe('AgentTool', () => {
         getFinalText: vi.fn().mockReturnValue('Monitor done'),
         getTerminateMode: vi.fn().mockReturnValue(AgentTerminateMode.GOAL),
         getExecutionSummary: vi.fn().mockReturnValue({}),
-        // Background spawn now stores the core on the registry entry so
-        // the UI footer can subscribe to the live event emitter. Return
-        // a minimal stub — registry.register is a spy here so the tests
-        // only need something truthy to pass through.
-        getCore: vi.fn().mockReturnValue({}),
+        // Background spawn subscribes to the core's event emitter to
+        // populate the entry's recentActivities buffer. Return a stub
+        // whose getEventEmitter() yields a minimal on/off surface so the
+        // test-time listener hookup doesn't throw.
+        getCore: vi.fn().mockReturnValue({
+          getEventEmitter: () => ({ on: vi.fn(), off: vi.fn() }),
+        }),
       } as unknown as AgentHeadless;
 
       mockContextState = { set: vi.fn() } as unknown as ContextState;

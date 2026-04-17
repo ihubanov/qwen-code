@@ -11,10 +11,8 @@
  * `AgentViewContext`, owns the Ctrl+F embedded-shell focus toggle, and
  * delegates transcript rendering to `AgentChatContent`.
  *
- * Background agents also render transcripts via `AgentChatContent`, but
- * from a different entry point (`BackgroundTaskDetailView`) that
- * doesn't rely on `AgentViewContext` — the two surfaces share rendering
- * without sharing lookup concerns.
+ * Background agents do not render a full transcript here — they use
+ * the compact `BackgroundTasksDialog` for observation.
  */
 
 import { useState, useEffect } from 'react';

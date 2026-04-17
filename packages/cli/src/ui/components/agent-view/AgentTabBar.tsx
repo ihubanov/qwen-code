@@ -66,8 +66,7 @@ export const AgentTabBar: React.FC = () => {
   const { switchToNext, switchToPrevious, setAgentTabBarFocused } =
     useAgentViewActions();
   const { entries: bgEntries } = useBackgroundAgentViewState();
-  const { setFooterFocused: setBgFooterFocused } =
-    useBackgroundAgentViewActions();
+  const { openDialog: openBgDialog } = useBackgroundAgentViewActions();
   const { embeddedShellFocused } = useUIState();
   const hasBgAgents = bgEntries.length > 0;
 
@@ -83,12 +82,11 @@ export const AgentTabBar: React.FC = () => {
       } else if (key.name === 'up') {
         setAgentTabBarFocused(false);
       } else if (key.name === 'down') {
-        // Down cascades to the next focusable region below: the
-        // background-tasks footer (if any). Otherwise stays on the tab
-        // bar. This mirrors the composer's Down → next footer flow.
+        // Down cascades to the Background tasks dialog if any background
+        // agents exist. Mirrors the composer's Down → open-dialog flow.
         if (hasBgAgents) {
           setAgentTabBarFocused(false);
-          setBgFooterFocused(true);
+          openBgDialog();
         }
       } else if (
         key.sequence &&

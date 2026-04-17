@@ -15,13 +15,8 @@
  * messages, tool calls/results, approval requests, and status changes.
  * Consumers don't need to wire their own listener plumbing.
  *
- * Used by:
- *   - `AgentChatView` for in-process (Arena) agents — passes through the
- *     embedded-shell PTY state so Ctrl+F interaction works.
- *   - `BackgroundTaskDetailView` for background agents — passes
- *     `readonly` so no embedded shell affordance is offered (background
- *     agents run with avoidPermissionPrompts=true and never expose a
- *     PTY for user input).
+ * Used by `AgentChatView` for in-process (Arena) agents — passes
+ * through the embedded-shell PTY state so Ctrl+F interaction works.
  */
 
 import { Box, Text, Static } from 'ink';

@@ -13,12 +13,12 @@
  */
 
 import { createDebugLogger } from '../utils/debugLogger.js';
-import type { AgentCore } from './runtime/agent-core.js';
 
 const debugLogger = createDebugLogger('BACKGROUND_TASKS');
 
 const MAX_DESCRIPTION_LENGTH = 40;
 const MAX_RESULT_LENGTH = 2000;
+const MAX_RECENT_ACTIVITIES = 5;
 
 // Escape text so it is safe to interpolate into an XML element body.
 // Subagent-produced strings (description, result, error) can contain `<`,
@@ -51,6 +51,21 @@ export interface AgentCompletionStats {
   durationMs: number;
 }
 
+/**
+ * A compact record of a recent tool invocation — drives the Progress
+ * section of the detail dialog. The Agent tool maintains a rolling
+ * buffer of these on each background entry by subscribing to the
+ * subagent's event emitter.
+ */
+export interface BackgroundActivity {
+  /** Tool name (e.g. `Bash`, `Read`). */
+  name: string;
+  /** Short one-line description — the tool's own render-friendly summary. */
+  description: string;
+  /** Emission timestamp (ms). */
+  at: number;
+}
+
 export interface BackgroundAgentEntry {
   agentId: string;
   description: string;
@@ -64,15 +79,20 @@ export interface BackgroundAgentEntry {
   stats?: AgentCompletionStats;
   toolUseId?: string;
   /**
-   * The AgentCore driving this background agent. Populated by the Agent
-   * tool at spawn time so UI consumers can read the live message history,
-   * live tool outputs, and event stream without needing access to the
-   * AgentHeadless wrapper itself. Optional because:
-   *   - the registry entry may briefly exist before the core is attached
-   *     (race window during spawn), and
-   *   - resume-restored entries have no live core.
+   * The original user-supplied prompt for the background task. Surfaced
+   * verbatim in the detail dialog's Prompt section. Optional because
+   * resume-restored entries may not have it.
    */
-  core?: AgentCore;
+  prompt?: string;
+  /**
+   * Rolling buffer (newest last, capped at MAX_RECENT_ACTIVITIES) of
+   * recent tool invocations by this agent. Feeds the detail dialog's
+   * Progress section. Replaced as a new array each time an activity is
+   * appended so reference-based change detection works. Optional:
+   * callers may register without providing it, and `appendActivity`
+   * initializes the array lazily.
+   */
+  recentActivities?: readonly BackgroundActivity[];
 }
 
 export interface NotificationMeta {
@@ -169,6 +189,24 @@ export class BackgroundTaskRegistry {
     debugLogger.info(`Background agent cancelled: ${agentId}`);
 
     this.emitNotification(entry);
+    this.emitStatusChange(entry);
+  }
+
+  /**
+   * Append a recent tool activity to a running entry's rolling buffer.
+   * No-op if the entry is not running — late events after a cancellation
+   * shouldn't leak into the Progress section.
+   */
+  appendActivity(agentId: string, activity: BackgroundActivity): void {
+    const entry = this.agents.get(agentId);
+    if (!entry || entry.status !== 'running') return;
+
+    const prior = entry.recentActivities ?? [];
+    const next = [...prior, activity];
+    if (next.length > MAX_RECENT_ACTIVITIES) {
+      next.splice(0, next.length - MAX_RECENT_ACTIVITIES);
+    }
+    entry.recentActivities = next;
     this.emitStatusChange(entry);
   }
 

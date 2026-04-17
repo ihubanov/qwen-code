@@ -128,10 +128,9 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
   const { pasteWorkaround } = useKeypressContext();
   const { agents, agentTabBarFocused } = useAgentViewState();
   const { setAgentTabBarFocused } = useAgentViewActions();
-  const { entries: bgEntries, footerFocused: bgFooterFocused } =
+  const { entries: bgEntries, dialogOpen: bgDialogOpen } =
     useBackgroundAgentViewState();
-  const { setFooterFocused: setBgFooterFocused } =
-    useBackgroundAgentViewActions();
+  const { openDialog: openBgDialog } = useBackgroundAgentViewActions();
   const hasAgents = agents.size > 0;
   const hasBgAgents = bgEntries.length > 0;
   const [justNavigatedHistory, setJustNavigatedHistory] = useState(false);
@@ -434,12 +433,12 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
 
   const handleInput = useCallback(
     (key: Key): boolean => {
-      // When the tab bar OR background footer has focus, block all
-      // non-printable keys so arrow keys and shortcuts don't interfere.
-      // Printable characters fall through to BaseTextInput's default
-      // handler so the first keystroke appears in the input immediately
-      // (the respective footer handler releases focus on the same event).
-      if (agentTabBarFocused || bgFooterFocused) {
+      // When the Arena tab bar has focus, block non-printable keys so
+      // arrow keys and shortcuts don't interfere. Printable characters
+      // fall through to BaseTextInput's default handler so the first
+      // keystroke appears in the input immediately (the tab bar handler
+      // releases focus on the same event).
+      if (agentTabBarFocused) {
         if (
           key.sequence &&
           key.sequence.length === 1 &&
@@ -449,6 +448,16 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
           return false; // let BaseTextInput type the character
         }
         return true; // consume non-printable keys
+      }
+
+      // When the Background tasks dialog is open, swallow every key so
+      // nothing reaches the composer buffer — the dialog's own keypress
+      // handler owns selection, open/close, and stop actions. Unlike
+      // the tab bar we do NOT let printable chars type through, because
+      // the dialog doesn't auto-close on printable input and users
+      // would leak text into the hidden composer.
+      if (bgDialogOpen) {
+        return true;
       }
 
       // TODO(jacobr): this special case is likely not needed anymore.
@@ -907,16 +916,16 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
             return true;
           }
           // Focus order on Down from an empty composer:
-          // team tab bar (if any Arena agents) → background-tasks
-          // footer (if any bg agents) → otherwise stay put. The tab bar
-          // itself re-routes Down into the bg footer once it has
-          // focus, so both footers remain reachable in sequence.
+          // team tab bar (if any Arena agents) → Background tasks dialog
+          // (if any bg agents) → otherwise stay put. The tab bar itself
+          // re-routes Down into the bg dialog once it has focus, so both
+          // surfaces remain reachable in sequence.
           if (hasAgents) {
             setAgentTabBarFocused(true);
             return true;
           }
           if (hasBgAgents) {
-            setBgFooterFocused(true);
+            openBgDialog();
             return true;
           }
           return true;
@@ -1082,11 +1091,11 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       parsePlaceholder,
       freePlaceholderId,
       agentTabBarFocused,
-      bgFooterFocused,
+      bgDialogOpen,
       hasAgents,
       hasBgAgents,
       setAgentTabBarFocused,
-      setBgFooterFocused,
+      openBgDialog,
       followup,
       onPromptSuggestionDismiss,
     ],

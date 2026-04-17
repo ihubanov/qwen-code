@@ -73,6 +73,16 @@ const getStatusText = (status: AgentResultDisplay['status']) => {
   }
 };
 
+/**
+ * Dim "(↓ to manage)" hint shown next to the background status.
+ * Educates the user that the Background tasks dialog exists at the
+ * moment the agent is launched — mirrors claw-code's inline launch
+ * tree hint.
+ */
+const BackgroundManageHint: React.FC = () => (
+  <Text color={theme.text.secondary}> (↓ to manage)</Text>
+);
+
 const MAX_TOOL_CALLS = 5;
 const MAX_TASK_PROMPT_LINES = 5;
 
@@ -150,6 +160,7 @@ export const AgentExecutionDisplay: React.FC<AgentExecutionDisplayProps> = ({
             </Text>
             <StatusDot status={data.status} />
             <StatusIndicator status={data.status} />
+            {data.status === 'background' && <BackgroundManageHint />}
           </Box>
         )}
 
@@ -231,6 +242,7 @@ export const AgentExecutionDisplay: React.FC<AgentExecutionDisplayProps> = ({
         </Text>
         <StatusDot status={data.status} />
         <StatusIndicator status={data.status} />
+        {data.status === 'background' && <BackgroundManageHint />}
       </Box>
 
       {/* Task description */}
