@@ -13,6 +13,7 @@
  */
 
 import { createDebugLogger } from '../utils/debugLogger.js';
+import type { AgentCore } from './runtime/agent-core.js';
 
 const debugLogger = createDebugLogger('BACKGROUND_TASKS');
 
@@ -38,6 +39,12 @@ export type BackgroundAgentStatus =
   | 'failed'
   | 'cancelled';
 
+/** Statuses where the agent is done. Adding a new terminal status only
+ * requires an edit here — UI consumers (unread tracking, etc.) read
+ * from this set. */
+export const BACKGROUND_TERMINAL_STATUSES: ReadonlySet<BackgroundAgentStatus> =
+  new Set<BackgroundAgentStatus>(['completed', 'failed', 'cancelled']);
+
 export interface AgentCompletionStats {
   totalTokens: number;
   toolUses: number;
@@ -56,6 +63,16 @@ export interface BackgroundAgentEntry {
   abortController: AbortController;
   stats?: AgentCompletionStats;
   toolUseId?: string;
+  /**
+   * The AgentCore driving this background agent. Populated by the Agent
+   * tool at spawn time so UI consumers can read the live message history,
+   * live tool outputs, and event stream without needing access to the
+   * AgentHeadless wrapper itself. Optional because:
+   *   - the registry entry may briefly exist before the core is attached
+   *     (race window during spawn), and
+   *   - resume-restored entries have no live core.
+   */
+  core?: AgentCore;
 }
 
 export interface NotificationMeta {
@@ -73,10 +90,22 @@ export type BackgroundNotificationCallback = (
 
 export type BackgroundRegisterCallback = (entry: BackgroundAgentEntry) => void;
 
+/**
+ * Fires on any entry state transition — register, complete, fail,
+ * cancel. Lets the TUI footer maintain a live mirror of the registry
+ * without stealing the single-slot register/notification callbacks,
+ * which are already owned by nonInteractiveCli (SDK task events) and
+ * useGeminiStream (in-conversation notifications) respectively.
+ */
+export type BackgroundStatusChangeCallback = (
+  entry: BackgroundAgentEntry,
+) => void;
+
 export class BackgroundTaskRegistry {
   private readonly agents = new Map<string, BackgroundAgentEntry>();
   private notificationCallback?: BackgroundNotificationCallback;
   private registerCallback?: BackgroundRegisterCallback;
+  private statusChangeCallback?: BackgroundStatusChangeCallback;
 
   register(entry: BackgroundAgentEntry): void {
     this.agents.set(entry.agentId, entry);
@@ -89,6 +118,7 @@ export class BackgroundTaskRegistry {
         debugLogger.error('Failed to emit register callback:', error);
       }
     }
+    this.emitStatusChange(entry);
   }
 
   // No-op if not 'running' — guards against race with concurrent cancellation.
@@ -107,6 +137,7 @@ export class BackgroundTaskRegistry {
     debugLogger.info(`Background agent completed: ${agentId}`);
 
     this.emitNotification(entry);
+    this.emitStatusChange(entry);
   }
 
   // No-op if not 'running' — guards against race with concurrent cancellation.
@@ -121,6 +152,7 @@ export class BackgroundTaskRegistry {
     debugLogger.info(`Background agent failed: ${agentId}`);
 
     this.emitNotification(entry);
+    this.emitStatusChange(entry);
   }
 
   // Emit the terminal notification here — the fire-and-forget complete()/fail()
@@ -137,6 +169,7 @@ export class BackgroundTaskRegistry {
     debugLogger.info(`Background agent cancelled: ${agentId}`);
 
     this.emitNotification(entry);
+    this.emitStatusChange(entry);
   }
 
   get(agentId: string): BackgroundAgentEntry | undefined {
@@ -149,6 +182,16 @@ export class BackgroundTaskRegistry {
     );
   }
 
+  /**
+   * Snapshot of every entry regardless of status. Used by the TUI
+   * footer to render rows for still-running AND terminal-state agents;
+   * the running-only `getRunning` view is kept for the SDK paths where
+   * completed entries are already surfaced via task_notification.
+   */
+  getAll(): BackgroundAgentEntry[] {
+    return Array.from(this.agents.values());
+  }
+
   setNotificationCallback(
     cb: BackgroundNotificationCallback | undefined,
   ): void {
@@ -157,6 +200,12 @@ export class BackgroundTaskRegistry {
 
   setRegisterCallback(cb: BackgroundRegisterCallback | undefined): void {
     this.registerCallback = cb;
+  }
+
+  setStatusChangeCallback(
+    cb: BackgroundStatusChangeCallback | undefined,
+  ): void {
+    this.statusChangeCallback = cb;
   }
 
   abortAll(): void {
@@ -243,6 +292,15 @@ export class BackgroundTaskRegistry {
       this.notificationCallback(displayLine, xmlParts.join('\n'), meta);
     } catch (error) {
       debugLogger.error('Failed to emit background notification:', error);
+    }
+  }
+
+  private emitStatusChange(entry: BackgroundAgentEntry): void {
+    if (!this.statusChangeCallback) return;
+    try {
+      this.statusChangeCallback(entry);
+    } catch (error) {
+      debugLogger.error('Failed to emit background status change:', error);
     }
   }
 }

@@ -37,6 +37,7 @@ import { SessionStatsProvider } from './ui/contexts/SessionContext.js';
 import { SettingsContext } from './ui/contexts/SettingsContext.js';
 import { VimModeProvider } from './ui/contexts/VimModeContext.js';
 import { AgentViewProvider } from './ui/contexts/AgentViewContext.js';
+import { BackgroundAgentViewProvider } from './ui/contexts/BackgroundAgentViewContext.js';
 import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
 import { themeManager } from './ui/themes/theme-manager.js';
 import { detectAndEnableKittyProtocol } from './ui/utils/kittyProtocolDetector.js';
@@ -169,13 +170,15 @@ export async function startInteractiveUI(
           <SessionStatsProvider sessionId={config.getSessionId()}>
             <VimModeProvider settings={settings}>
               <AgentViewProvider config={config}>
-                <AppContainer
-                  config={config}
-                  settings={settings}
-                  startupWarnings={startupWarnings}
-                  version={version}
-                  initializationResult={initializationResult}
-                />
+                <BackgroundAgentViewProvider config={config}>
+                  <AppContainer
+                    config={config}
+                    settings={settings}
+                    startupWarnings={startupWarnings}
+                    version={version}
+                    initializationResult={initializationResult}
+                  />
+                </BackgroundAgentViewProvider>
               </AgentViewProvider>
             </VimModeProvider>
           </SessionStatsProvider>

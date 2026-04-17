@@ -1038,6 +1038,11 @@ class AgentToolInvocation extends BaseToolInvocation<AgentParams, ToolResult> {
           startTime: Date.now(),
           abortController: bgAbortController,
           toolUseId: this.callId,
+          // Exposes the agent's observable surface (message history, live
+          // tool outputs, event emitter) to TUI consumers — the background
+          // agent UI footer reads this to render a detail view without
+          // needing to cross the AgentHeadless boundary.
+          core: bgSubagent.getCore(),
         });
 
         const getCompletionStats = () => {

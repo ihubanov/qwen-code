@@ -26,6 +26,10 @@ import {
   useAgentViewActions,
   type RegisteredAgent,
 } from '../../contexts/AgentViewContext.js';
+import {
+  useBackgroundAgentViewState,
+  useBackgroundAgentViewActions,
+} from '../../contexts/BackgroundAgentViewContext.js';
 import { useKeypress } from '../../hooks/useKeypress.js';
 import { useUIState } from '../../contexts/UIStateContext.js';
 import { theme } from '../../semantic-colors.js';
@@ -61,7 +65,11 @@ export const AgentTabBar: React.FC = () => {
     useAgentViewState();
   const { switchToNext, switchToPrevious, setAgentTabBarFocused } =
     useAgentViewActions();
+  const { entries: bgEntries } = useBackgroundAgentViewState();
+  const { setFooterFocused: setBgFooterFocused } =
+    useBackgroundAgentViewActions();
   const { embeddedShellFocused } = useUIState();
+  const hasBgAgents = bgEntries.length > 0;
 
   useKeypress(
     (key) => {
@@ -74,6 +82,14 @@ export const AgentTabBar: React.FC = () => {
         switchToNext();
       } else if (key.name === 'up') {
         setAgentTabBarFocused(false);
+      } else if (key.name === 'down') {
+        // Down cascades to the next focusable region below: the
+        // background-tasks footer (if any). Otherwise stays on the tab
+        // bar. This mirrors the composer's Down → next footer flow.
+        if (hasBgAgents) {
+          setAgentTabBarFocused(false);
+          setBgFooterFocused(true);
+        }
       } else if (
         key.sequence &&
         key.sequence.length === 1 &&

@@ -1427,6 +1427,11 @@ describe('AgentTool', () => {
         getFinalText: vi.fn().mockReturnValue('Monitor done'),
         getTerminateMode: vi.fn().mockReturnValue(AgentTerminateMode.GOAL),
         getExecutionSummary: vi.fn().mockReturnValue({}),
+        // Background spawn now stores the core on the registry entry so
+        // the UI footer can subscribe to the live event emitter. Return
+        // a minimal stub — registry.register is a spy here so the tests
+        // only need something truthy to pass through.
+        getCore: vi.fn().mockReturnValue({}),
       } as unknown as AgentHeadless;
 
       mockContextState = { set: vi.fn() } as unknown as ContextState;

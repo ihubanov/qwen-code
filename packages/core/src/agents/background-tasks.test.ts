@@ -261,6 +261,108 @@ describe('BackgroundTaskRegistry', () => {
     expect(meta.toolUseId).toBeUndefined();
   });
 
+  it('getAll returns every entry regardless of status', () => {
+    registry.register({
+      agentId: 'a',
+      description: 'agent a',
+      status: 'running',
+      startTime: Date.now(),
+      abortController: new AbortController(),
+    });
+    registry.register({
+      agentId: 'b',
+      description: 'agent b',
+      status: 'running',
+      startTime: Date.now(),
+      abortController: new AbortController(),
+    });
+    registry.register({
+      agentId: 'c',
+      description: 'agent c',
+      status: 'running',
+      startTime: Date.now(),
+      abortController: new AbortController(),
+    });
+
+    registry.complete('a', 'done');
+    registry.fail('b', 'boom');
+
+    const all = registry.getAll();
+    expect(all).toHaveLength(3);
+    expect(all.map((e) => e.status).sort()).toEqual([
+      'completed',
+      'failed',
+      'running',
+    ]);
+    // getRunning still filters to running-only for the SDK paths.
+    expect(registry.getRunning().map((e) => e.agentId)).toEqual(['c']);
+  });
+
+  it('statusChange callback fires on register and every state transition', () => {
+    const seen: Array<{ id: string; status: string }> = [];
+    registry.setStatusChangeCallback((entry) => {
+      seen.push({ id: entry.agentId, status: entry.status });
+    });
+
+    registry.register({
+      agentId: 'a',
+      description: 'agent a',
+      status: 'running',
+      startTime: Date.now(),
+      abortController: new AbortController(),
+    });
+    registry.register({
+      agentId: 'b',
+      description: 'agent b',
+      status: 'running',
+      startTime: Date.now(),
+      abortController: new AbortController(),
+    });
+    registry.complete('a', 'ok');
+    registry.fail('b', 'err');
+
+    expect(seen).toEqual([
+      { id: 'a', status: 'running' },
+      { id: 'b', status: 'running' },
+      { id: 'a', status: 'completed' },
+      { id: 'b', status: 'failed' },
+    ]);
+  });
+
+  it('statusChange callback errors do not break registry operations', () => {
+    registry.setStatusChangeCallback(() => {
+      throw new Error('listener broke');
+    });
+
+    // Should not throw even though the callback does.
+    expect(() =>
+      registry.register({
+        agentId: 'a',
+        description: 'agent a',
+        status: 'running',
+        startTime: Date.now(),
+        abortController: new AbortController(),
+      }),
+    ).not.toThrow();
+    expect(registry.get('a')?.status).toBe('running');
+  });
+
+  it('statusChange callback can be cleared with undefined', () => {
+    const cb = vi.fn();
+    registry.setStatusChangeCallback(cb);
+    registry.setStatusChangeCallback(undefined);
+
+    registry.register({
+      agentId: 'a',
+      description: 'agent a',
+      status: 'running',
+      startTime: Date.now(),
+      abortController: new AbortController(),
+    });
+
+    expect(cb).not.toHaveBeenCalled();
+  });
+
   it('escapes XML metacharacters in interpolated fields', () => {
     const callback = vi.fn();
     registry.setNotificationCallback(callback);

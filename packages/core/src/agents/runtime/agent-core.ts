@@ -28,6 +28,7 @@ import {
 import type {
   ToolConfirmationOutcome,
   ToolCallConfirmationDetails,
+  ToolResultDisplay,
 } from '../../tools/tools.js';
 import { getInitialChatHistory } from '../../utils/environmentContext.js';
 import type {
@@ -44,6 +45,7 @@ import type {
   ModelConfig,
   RunConfig,
   ToolConfig,
+  AgentMessage,
 } from './agent-types.js';
 import { AgentTerminateMode } from './agent-types.js';
 import type {
@@ -55,7 +57,7 @@ import type {
   AgentUsageEvent,
   AgentHooks,
 } from './agent-events.js';
-import { type AgentEventEmitter, AgentEventType } from './agent-events.js';
+import { AgentEventEmitter, AgentEventType } from './agent-events.js';
 import { AgentStatistics, type AgentStatsSummary } from './agent-statistics.js';
 import { matchesMcpPattern } from '../../permissions/rule-parser.js';
 import { ToolNames } from '../../tools/tool-names.js';
@@ -151,9 +153,25 @@ export class AgentCore {
   readonly modelConfig: ModelConfig;
   readonly runConfig: RunConfig;
   readonly toolConfig?: ToolConfig;
-  readonly eventEmitter?: AgentEventEmitter;
+  /**
+   * Event emitter for this agent. Always present — if the caller doesn't
+   * pass one, AgentCore allocates its own so the observable state below
+   * is populated regardless of who constructs the agent.
+   */
+  readonly eventEmitter: AgentEventEmitter;
   readonly hooks?: AgentHooks;
   readonly stats = new AgentStatistics();
+
+  // Observable state — populated by listeners set up in the constructor,
+  // exposed read-only to renderers via getters. Lives on Core (not on a
+  // wrapper) so headless/background agents can also be observed.
+  private readonly messages: AgentMessage[] = [];
+  private readonly pendingApprovals = new Map<
+    string,
+    ToolCallConfirmationDetails
+  >();
+  private readonly liveOutputs = new Map<string, ToolResultDisplay>();
+  private readonly shellPids = new Map<string, number>();
 
   /**
    * Legacy execution stats maintained for aggregate tracking.
@@ -205,8 +223,9 @@ export class AgentCore {
     this.modelConfig = modelConfig;
     this.runConfig = runConfig;
     this.toolConfig = toolConfig;
-    this.eventEmitter = eventEmitter;
+    this.eventEmitter = eventEmitter ?? new AgentEventEmitter();
     this.hooks = hooks;
+    this.setupStateListeners();
   }
 
   // ─── Chat Creation ────────────────────────────────────────
@@ -899,6 +918,64 @@ export class AgentCore {
     return [{ role: 'user', parts: toolResponseParts }];
   }
 
+  // ─── Observable state accessors ────────────────────────────
+
+  getMessages(): readonly AgentMessage[] {
+    return this.messages;
+  }
+
+  /**
+   * Tool calls currently awaiting user approval. Mutated by
+   * AgentInteractive's TOOL_WAITING_APPROVAL handler; headless agents
+   * never populate this because they run with
+   * `getShouldAvoidPermissionPrompts === true`.
+   */
+  getPendingApprovals(): ReadonlyMap<string, ToolCallConfirmationDetails> {
+    return this.pendingApprovals;
+  }
+
+  getLiveOutputs(): ReadonlyMap<string, ToolResultDisplay> {
+    return this.liveOutputs;
+  }
+
+  getShellPids(): ReadonlyMap<string, number> {
+    return this.shellPids;
+  }
+
+  pushMessage(
+    role: AgentMessage['role'],
+    content: string,
+    options?: { thought?: boolean; metadata?: Record<string, unknown> },
+  ): void {
+    const message: AgentMessage = {
+      role,
+      content,
+      timestamp: Date.now(),
+    };
+    if (options?.thought) {
+      message.thought = true;
+    }
+    if (options?.metadata) {
+      message.metadata = options.metadata;
+    }
+    this.messages.push(message);
+  }
+
+  setPendingApproval(
+    callId: string,
+    details: ToolCallConfirmationDetails,
+  ): void {
+    this.pendingApprovals.set(callId, details);
+  }
+
+  deletePendingApproval(callId: string): void {
+    this.pendingApprovals.delete(callId);
+  }
+
+  clearPendingApprovals(): void {
+    this.pendingApprovals.clear();
+  }
+
   // ─── Stats & Events ───────────────────────────────────────
 
   getEventEmitter(): AgentEventEmitter | undefined {
@@ -1012,6 +1089,78 @@ export class AgentCore {
   }
 
   // ─── Private Helpers ──────────────────────────────────────
+
+  /**
+   * Subscribes to this agent's own event stream and mirrors the events
+   * into the observable state containers (messages, liveOutputs,
+   * shellPids). Called once from the constructor. Consumers (UI) can
+   * attach their own listeners to the same emitter — Node's
+   * EventEmitter supports multiple subscribers per event.
+   *
+   * Approval handling (TOOL_WAITING_APPROVAL) is deliberately NOT
+   * listened to here because the correct response depends on whether
+   * the consumer is interactive (needs to wrap onConfirm with
+   * cancel-round behavior) or headless (approvals never fire because
+   * `getShouldAvoidPermissionPrompts` is true). AgentInteractive owns
+   * that listener and writes into `pendingApprovals` via the public
+   * setPendingApproval/deletePendingApproval API.
+   */
+  private setupStateListeners(): void {
+    const emitter = this.eventEmitter;
+
+    emitter.on(AgentEventType.ROUND_TEXT, (event: AgentRoundTextEvent) => {
+      if (event.thoughtText) {
+        this.pushMessage('assistant', event.thoughtText, { thought: true });
+      }
+      if (event.text) {
+        this.pushMessage('assistant', event.text);
+      }
+    });
+
+    emitter.on(AgentEventType.TOOL_CALL, (event: AgentToolCallEvent) => {
+      this.pushMessage('tool_call', `Tool call: ${event.name}`, {
+        metadata: {
+          callId: event.callId,
+          toolName: event.name,
+          args: event.args,
+          description: event.description,
+          renderOutputAsMarkdown: event.isOutputMarkdown,
+          round: event.round,
+        },
+      });
+    });
+
+    emitter.on(
+      AgentEventType.TOOL_OUTPUT_UPDATE,
+      (event: AgentToolOutputUpdateEvent) => {
+        this.liveOutputs.set(event.callId, event.outputChunk);
+        if (event.pid !== undefined) {
+          this.shellPids.set(event.callId, event.pid);
+        }
+      },
+    );
+
+    emitter.on(AgentEventType.TOOL_RESULT, (event: AgentToolResultEvent) => {
+      this.liveOutputs.delete(event.callId);
+      this.shellPids.delete(event.callId);
+      this.pendingApprovals.delete(event.callId);
+
+      const statusText = event.success ? 'succeeded' : 'failed';
+      const summary = event.error
+        ? `Tool ${event.name} ${statusText}: ${event.error}`
+        : `Tool ${event.name} ${statusText}`;
+      this.pushMessage('tool_result', summary, {
+        metadata: {
+          callId: event.callId,
+          toolName: event.name,
+          success: event.success,
+          resultDisplay: event.resultDisplay,
+          outputFile: event.outputFile,
+          round: event.round,
+        },
+      });
+    });
+  }
 
   /**
    * Builds the system prompt with template substitution and optional
