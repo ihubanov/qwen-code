@@ -54,40 +54,26 @@ export function useBackgroundAgentView(
     // setStatusChangeCallback.
     setEntries(sortEntries(registry.getAll()));
 
-    const onStatusChange = (_entry: BackgroundAgentEntry) => {
+    const onStatusChange = (entry: BackgroundAgentEntry) => {
       const all = sortEntries(registry.getAll());
       // Reuse the previous reference when nothing observable changed —
       // status callbacks fire on every transition, but consumers only
       // re-render when the (id, status) tuple list shifts.
       setEntries((prev) => (entriesEqual(prev, all) ? prev : all));
 
-      setUnread((prev) => {
-        let next: Set<string> | null = null;
-        for (const e of all) {
-          if (
-            BACKGROUND_TERMINAL_STATUSES.has(e.status) &&
-            !prev.has(e.agentId)
-          ) {
-            // Only mark entries as unread when they *transition* into a
-            // terminal state. Entries that were already in prev.unread
-            // (user hasn't viewed them yet) stay in the set; entries
-            // that are still running don't enter it.
-            if (!next) next = new Set(prev);
-            next.add(e.agentId);
-          }
-        }
-        // Also drop any agentIds from unread that no longer exist in
-        // the registry (defensive — shouldn't happen in practice since
-        // the registry never removes entries mid-session).
-        const agentIds = new Set(all.map((e) => e.agentId));
-        for (const id of prev) {
-          if (!agentIds.has(id)) {
-            if (!next) next = new Set(prev);
-            next.delete(id);
-          }
-        }
-        return next ?? prev;
-      });
+      // Unread tracks the transition non-terminal → terminal for the
+      // specific entry whose status just changed. Iterating across
+      // every terminal entry here would re-mark agents the user has
+      // already cleared via `clearUnread` whenever an unrelated agent
+      // later transitions.
+      if (BACKGROUND_TERMINAL_STATUSES.has(entry.status)) {
+        setUnread((prev) => {
+          if (prev.has(entry.agentId)) return prev;
+          const next = new Set(prev);
+          next.add(entry.agentId);
+          return next;
+        });
+      }
     };
 
     registry.setStatusChangeCallback(onStatusChange);

@@ -221,6 +221,14 @@ export class AgentHeadless {
       { role: 'user' as const, parts: [{ text: initialTaskText }] },
     ];
 
+    // Mirror what AgentInteractive does in its run loop: record the
+    // initial user turn in the observable message log so surfaces
+    // reading AgentCore.getMessages() (e.g. the background-agent
+    // detail view) render the task prompt alongside the assistant's
+    // response. Without this the transcript shows only tool calls
+    // and the agent's answer.
+    this.core.pushMessage('user', initialTaskText);
+
     const startTime = Date.now();
     this.core.executionStats.startTimeMs = startTime;
     this.core.stats.start(startTime);

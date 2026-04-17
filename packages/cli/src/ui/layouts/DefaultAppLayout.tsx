@@ -54,6 +54,20 @@ export const DefaultAppLayout: React.FC = () => {
     }
   }, [activeView, refreshStatic]);
 
+  // Same treatment for the full-swap detail overlay. Entering full-swap
+  // replaces Ink's live tree with the detail panel only, but previously
+  // printed <Static> lines from the parent conversation (MainContent)
+  // or the agent transcript (AgentChatContent) remain in the terminal's
+  // scrollback / topmost viewport rows and visually leak into what is
+  // supposed to be a dedicated detail screen. Exiting does the reverse.
+  const prevFullSwapRef = useRef(bgDetailFullSwap);
+  useEffect(() => {
+    if (prevFullSwapRef.current !== bgDetailFullSwap) {
+      prevFullSwapRef.current = bgDetailFullSwap;
+      refreshStatic();
+    }
+  }, [bgDetailFullSwap, refreshStatic]);
+
   // Full-swap: detail view covers the whole viewport, composer and
   // parent conversation are hidden until the user hits Esc.
   if (bgDetailFullSwap) {

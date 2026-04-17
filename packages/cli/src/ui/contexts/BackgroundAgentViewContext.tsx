@@ -175,6 +175,12 @@ export function BackgroundAgentViewProvider({
       if (!target) return;
       setDetailOpenFor(target);
       clearUnread(target);
+      // Release footer focus while the detail overlay owns the screen.
+      // The footer is unmounted by the layout while detail is open, so
+      // leaving `footerFocused` stale would trap composer keystrokes —
+      // `InputPrompt` blocks non-printable keys whenever either footer
+      // is focused. The detail view re-sets it on Esc.
+      setFooterFocused(false);
     },
     [entries, selectedIndex, clearUnread],
   );
