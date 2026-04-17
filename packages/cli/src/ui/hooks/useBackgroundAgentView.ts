@@ -5,18 +5,15 @@
  */
 
 /**
- * @fileoverview useBackgroundAgentView — subscribes to the background
- * task registry and maintains a reactive snapshot of every
+ * useBackgroundAgentView — subscribes to the background task registry's
+ * status-change callback and maintains a reactive snapshot of every
  * `BackgroundAgentEntry`.
  *
- * Owns the registry's `setStatusChangeCallback` slot (single-slot, safe
- * because nonInteractiveCli's callbacks and the TUI never run in the
- * same process).
- *
- * The snapshot re-renders on any entry mutation — status transitions and
- * `appendActivity` calls both route through `statusChangeCallback`. That
- * lets the detail dialog's Progress section update live without the hook
- * needing per-entry event subscriptions.
+ * Intentionally ignores activity updates (appendActivity). Tool-call
+ * traffic from a running background agent would otherwise churn the
+ * Footer pill and the AppContainer every few hundred ms. The detail
+ * dialog subscribes to the activity callback directly when it needs
+ * live Progress updates.
  */
 
 import { useState, useEffect } from 'react';
@@ -38,16 +35,14 @@ export function useBackgroundAgentView(
     if (!config) return;
     const registry = config.getBackgroundTaskRegistry();
 
-    // Seed state with the current snapshot. Subsequent updates come via
-    // setStatusChangeCallback.
     setEntries(sortEntries(registry.getAll()));
 
     const onStatusChange = () => {
-      // Always rebuild the array so reference equality breaks and
-      // consumers re-render. Activity updates mutate the same entry
-      // object in place; only a fresh outer array reliably triggers
-      // React re-renders for memoised children.
-      setEntries(sortEntries(registry.getAll()));
+      const all = sortEntries(registry.getAll());
+      // Skip the state update when the (id, status) tuple list is
+      // unchanged — prevents re-renders for callbacks that don't
+      // actually change what the roster/pill shows.
+      setEntries((prev) => (entriesEqual(prev, all) ? prev : all));
     };
 
     registry.setStatusChangeCallback(onStatusChange);
@@ -60,8 +55,19 @@ export function useBackgroundAgentView(
   return { entries };
 }
 
-// ─── Helpers ────────────────────────────────────────────────
-
 function sortEntries(entries: BackgroundAgentEntry[]): BackgroundAgentEntry[] {
   return [...entries].sort((a, b) => a.startTime - b.startTime);
+}
+
+function entriesEqual(
+  a: readonly BackgroundAgentEntry[],
+  b: readonly BackgroundAgentEntry[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i]!.agentId !== b[i]!.agentId || a[i]!.status !== b[i]!.status) {
+      return false;
+    }
+  }
+  return true;
 }

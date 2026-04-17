@@ -27,7 +27,7 @@
  */
 
 import type React from 'react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Box, Text } from 'ink';
 import {
   useBackgroundAgentViewState,
@@ -37,6 +37,7 @@ import { useKeypress } from '../../hooks/useKeypress.js';
 import { theme } from '../../semantic-colors.js';
 import { useConfig } from '../../contexts/ConfigContext.js';
 import type { BackgroundAgentEntry } from '@qwen-code/qwen-code-core';
+import { formatDuration, formatTokenCount } from '../../utils/formatters.js';
 
 const MAX_LABEL_LENGTH = 40;
 
@@ -68,22 +69,10 @@ function rowLabel(entry: BackgroundAgentEntry): string {
     : raw;
 }
 
-function formatElapsed(entry: BackgroundAgentEntry): string {
-  const end = entry.endTime ?? Date.now();
-  const ms = Math.max(0, end - entry.startTime);
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const r = s - m * 60;
-  return r === 0 ? `${m}m` : `${m}m ${r}s`;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1000) {
-    const k = n / 1000;
-    return `${k >= 10 ? k.toFixed(0) : k.toFixed(1)}k tokens`;
-  }
-  return `${n} tokens`;
+function elapsedFor(entry: BackgroundAgentEntry): string {
+  return formatDuration(
+    Math.max(0, (entry.endTime ?? Date.now()) - entry.startTime),
+  );
 }
 
 // ─── List mode ─────────────────────────────────────────────
@@ -157,9 +146,9 @@ const DetailBody: React.FC<{ entry: BackgroundAgentEntry }> = ({ entry }) => {
           : 'Stopped',
     );
   }
-  subtitleParts.push(formatElapsed(entry));
+  subtitleParts.push(elapsedFor(entry));
   if (entry.stats?.totalTokens) {
-    subtitleParts.push(formatTokens(entry.stats.totalTokens));
+    subtitleParts.push(`${formatTokenCount(entry.stats.totalTokens)} tokens`);
   }
   if (entry.stats?.toolUses !== undefined) {
     subtitleParts.push(
@@ -225,10 +214,10 @@ export const BackgroundTasksDialog: React.FC = () => {
   const {
     moveSelectionUp,
     moveSelectionDown,
-    openDialog: _openDialog,
     closeDialog,
     enterDetail,
     exitDetail,
+    cancelSelected,
   } = useBackgroundAgentViewActions();
   const config = useConfig();
 
@@ -236,6 +225,20 @@ export const BackgroundTasksDialog: React.FC = () => {
     () => entries[selectedIndex] ?? null,
     [entries, selectedIndex],
   );
+
+  // Tick up a local counter on each activity callback to force the
+  // detail body to re-render while it's open. The main status
+  // subscription in useBackgroundAgentView intentionally ignores
+  // activity updates so the Footer pill and AppContainer don't re-run
+  // on every tool call a background agent makes.
+  const [, bumpActivity] = useState(0);
+  useEffect(() => {
+    if (!dialogOpen || dialogMode !== 'detail') return;
+    const registry = config.getBackgroundTaskRegistry();
+    const onActivity = () => bumpActivity((n) => n + 1);
+    registry.setActivityChangeCallback(onActivity);
+    return () => registry.setActivityChangeCallback(undefined);
+  }, [dialogOpen, dialogMode, config]);
 
   useKeypress(
     (key) => {
@@ -259,13 +262,7 @@ export const BackgroundTasksDialog: React.FC = () => {
           return;
         }
         if (key.sequence === 'x' && !key.ctrl && !key.meta) {
-          if (selectedEntry?.status === 'running') {
-            try {
-              config.getBackgroundTaskRegistry().cancel(selectedEntry.agentId);
-            } catch {
-              // registry missing → ignore; the dialog will remain open
-            }
-          }
+          cancelSelected();
           return;
         }
         // Note: the "stop all agents" chord (ctrl+x ctrl+k in claw-code)
@@ -290,13 +287,7 @@ export const BackgroundTasksDialog: React.FC = () => {
         return;
       }
       if (key.sequence === 'x' && !key.ctrl && !key.meta) {
-        if (selectedEntry?.status === 'running') {
-          try {
-            config.getBackgroundTaskRegistry().cancel(selectedEntry.agentId);
-          } catch {
-            /* ignore */
-          }
-        }
+        cancelSelected();
         return;
       }
     },

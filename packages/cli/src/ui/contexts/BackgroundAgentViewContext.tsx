@@ -52,20 +52,15 @@ export interface BackgroundAgentViewState {
 }
 
 export interface BackgroundAgentViewActions {
-  /** Set which row is focused (no-op when index is out of range). */
   setSelectedIndex(index: number): void;
-  /** Move selection up by one; clamps at 0. Returns `true` if moved. */
   moveSelectionUp(): boolean;
-  /** Move selection down by one; clamps at entries.length-1. Returns `true` if moved. */
   moveSelectionDown(): boolean;
-  /** Open the dialog in list mode. */
   openDialog(): void;
-  /** Close the dialog regardless of mode. */
   closeDialog(): void;
-  /** Enter detail mode for the currently selected entry. */
   enterDetail(): void;
-  /** Return from detail mode to list mode. */
   exitDetail(): void;
+  /** Cancel the currently selected entry (no-op if not running). */
+  cancelSelected(): void;
 }
 
 // ─── Context ────────────────────────────────────────────────
@@ -95,6 +90,7 @@ const DEFAULT_ACTIONS: BackgroundAgentViewActions = {
   closeDialog: noop,
   enterDetail: noop,
   exitDetail: noop,
+  cancelSelected: noop,
 };
 
 // ─── Hooks ──────────────────────────────────────────────────
@@ -118,8 +114,6 @@ export function BackgroundAgentViewProvider({
   config,
   children,
 }: BackgroundAgentViewProviderProps) {
-  // Entries are driven by the registry subscription in
-  // useBackgroundAgentView. Local React state holds the overlay concerns.
   const { entries } = useBackgroundAgentView(config ?? null);
 
   const [rawSelectedIndex, setRawSelectedIndex] = useState(0);
@@ -173,6 +167,17 @@ export function BackgroundAgentViewProvider({
     setDialogMode('list');
   }, []);
 
+  const cancelSelected = useCallback(() => {
+    if (!config) return;
+    const target = entries[selectedIndex];
+    if (!target || target.status !== 'running') return;
+    try {
+      config.getBackgroundTaskRegistry().cancel(target.agentId);
+    } catch {
+      // Registry unavailable — ignore. The dialog stays open.
+    }
+  }, [config, entries, selectedIndex]);
+
   const state: BackgroundAgentViewState = useMemo(
     () => ({
       entries,
@@ -192,6 +197,7 @@ export function BackgroundAgentViewProvider({
       closeDialog,
       enterDetail,
       exitDetail,
+      cancelSelected,
     }),
     [
       setSelectedIndex,
@@ -201,6 +207,7 @@ export function BackgroundAgentViewProvider({
       closeDialog,
       enterDetail,
       exitDetail,
+      cancelSelected,
     ],
   );
 

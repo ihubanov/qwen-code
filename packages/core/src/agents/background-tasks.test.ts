@@ -405,9 +405,11 @@ describe('BackgroundTaskRegistry', () => {
     expect(registry.get('a')!.recentActivities ?? []).toHaveLength(0);
   });
 
-  it('appendActivity fires the statusChange callback so UI can re-render', () => {
-    const cb = vi.fn();
-    registry.setStatusChangeCallback(cb);
+  it('appendActivity fires activityChange, not statusChange', () => {
+    const statusCb = vi.fn();
+    const activityCb = vi.fn();
+    registry.setStatusChangeCallback(statusCb);
+    registry.setActivityChangeCallback(activityCb);
 
     registry.register({
       agentId: 'a',
@@ -416,11 +418,14 @@ describe('BackgroundTaskRegistry', () => {
       startTime: Date.now(),
       abortController: new AbortController(),
     });
-    cb.mockClear();
+    statusCb.mockClear();
+    activityCb.mockClear();
 
     registry.appendActivity('a', { name: 'T', description: 'd', at: 0 });
-    expect(cb).toHaveBeenCalledOnce();
-    expect(cb.mock.calls[0][0].agentId).toBe('a');
+
+    expect(statusCb).not.toHaveBeenCalled();
+    expect(activityCb).toHaveBeenCalledOnce();
+    expect(activityCb.mock.calls[0][0].agentId).toBe('a');
   });
 
   it('stores prompt verbatim on the entry', () => {

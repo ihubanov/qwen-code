@@ -20,6 +20,31 @@ const MAX_DESCRIPTION_LENGTH = 40;
 const MAX_RESULT_LENGTH = 2000;
 const MAX_RECENT_ACTIVITIES = 5;
 
+/**
+ * Produces the human-facing label for an entry — `subagentType: desc`
+ * with a redundant prefix stripped and the description truncated to
+ * MAX_DESCRIPTION_LENGTH. Single source of truth shared by the
+ * notification payload (model-facing) and the TUI dialog (user-facing)
+ * so the two surfaces never drift.
+ */
+export function buildBackgroundEntryLabel(entry: {
+  description: string;
+  subagentType?: string;
+}): string {
+  let raw = entry.description;
+  if (
+    entry.subagentType &&
+    raw.toLowerCase().startsWith(entry.subagentType.toLowerCase() + ':')
+  ) {
+    raw = raw.slice(entry.subagentType.length + 1).trimStart();
+  }
+  const truncated =
+    raw.length > MAX_DESCRIPTION_LENGTH
+      ? raw.slice(0, MAX_DESCRIPTION_LENGTH - 1) + '\u2026'
+      : raw;
+  return entry.subagentType ? `${entry.subagentType}: ${truncated}` : truncated;
+}
+
 // Escape text so it is safe to interpolate into an XML element body.
 // Subagent-produced strings (description, result, error) can contain `<`,
 // `>`, or literal `</task-notification>` — without escaping, a subagent
@@ -111,13 +136,17 @@ export type BackgroundNotificationCallback = (
 export type BackgroundRegisterCallback = (entry: BackgroundAgentEntry) => void;
 
 /**
- * Fires on any entry state transition — register, complete, fail,
- * cancel. Lets the TUI footer maintain a live mirror of the registry
- * without stealing the single-slot register/notification callbacks,
- * which are already owned by nonInteractiveCli (SDK task events) and
- * useGeminiStream (in-conversation notifications) respectively.
+ * Fires on entry status transitions — register, complete, fail, cancel.
+ * Intentionally does NOT fire on `appendActivity` so consumers that only
+ * care about the pill / roster (Footer, AppContainer) don't re-render
+ * on every tool call a background agent makes.
  */
 export type BackgroundStatusChangeCallback = (
+  entry: BackgroundAgentEntry,
+) => void;
+
+/** Fires on `appendActivity` — scoped to detail-view consumers. */
+export type BackgroundActivityChangeCallback = (
   entry: BackgroundAgentEntry,
 ) => void;
 
@@ -126,6 +155,7 @@ export class BackgroundTaskRegistry {
   private notificationCallback?: BackgroundNotificationCallback;
   private registerCallback?: BackgroundRegisterCallback;
   private statusChangeCallback?: BackgroundStatusChangeCallback;
+  private activityChangeCallback?: BackgroundActivityChangeCallback;
 
   register(entry: BackgroundAgentEntry): void {
     this.agents.set(entry.agentId, entry);
@@ -207,7 +237,7 @@ export class BackgroundTaskRegistry {
       next.splice(0, next.length - MAX_RECENT_ACTIVITIES);
     }
     entry.recentActivities = next;
-    this.emitStatusChange(entry);
+    this.emitActivityChange(entry);
   }
 
   get(agentId: string): BackgroundAgentEntry | undefined {
@@ -246,6 +276,12 @@ export class BackgroundTaskRegistry {
     this.statusChangeCallback = cb;
   }
 
+  setActivityChangeCallback(
+    cb: BackgroundActivityChangeCallback | undefined,
+  ): void {
+    this.activityChangeCallback = cb;
+  }
+
   abortAll(): void {
     for (const entry of Array.from(this.agents.values())) {
       this.cancel(entry.agentId);
@@ -254,20 +290,7 @@ export class BackgroundTaskRegistry {
   }
 
   private buildDisplayLabel(entry: BackgroundAgentEntry): string {
-    // Strip the subagent type prefix if the description already starts with it
-    // to avoid duplication like "Explore: Explore: list ts files".
-    let rawDesc = entry.description;
-    if (
-      entry.subagentType &&
-      rawDesc.toLowerCase().startsWith(entry.subagentType.toLowerCase() + ':')
-    ) {
-      rawDesc = rawDesc.slice(entry.subagentType.length + 1).trimStart();
-    }
-    const desc =
-      rawDesc.length > MAX_DESCRIPTION_LENGTH
-        ? rawDesc.slice(0, MAX_DESCRIPTION_LENGTH) + '...'
-        : rawDesc;
-    return entry.subagentType ? `${entry.subagentType}: ${desc}` : desc;
+    return buildBackgroundEntryLabel(entry);
   }
 
   private emitNotification(entry: BackgroundAgentEntry): void {
@@ -339,6 +362,15 @@ export class BackgroundTaskRegistry {
       this.statusChangeCallback(entry);
     } catch (error) {
       debugLogger.error('Failed to emit background status change:', error);
+    }
+  }
+
+  private emitActivityChange(entry: BackgroundAgentEntry): void {
+    if (!this.activityChangeCallback) return;
+    try {
+      this.activityChangeCallback(entry);
+    } catch (error) {
+      debugLogger.error('Failed to emit background activity change:', error);
     }
   }
 }
