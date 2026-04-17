@@ -11,7 +11,8 @@
  *   "Local agents" section renders (shells are out of scope for this PR
  *   but the section scaffolding can grow to include them). ↑/↓ moves
  *   selection, Enter opens the detail mode, x cancels the selected
- *   entry, ctrl+x ctrl+k cancels every running agent, ←/Esc closes.
+ *   entry, ←/Esc closes. Stop-all is deferred until proper chord
+ *   handling lands.
  *
  * - `detail`: compact view of the selected entry. Shows
  *   `subagent-type › description`, a stats subtitle (elapsed, tokens,
