@@ -10,6 +10,7 @@ import { ConversationStore } from '../../services/conversationStore.js';
 import type {
   RequestPermissionRequest,
   ModelInfo,
+  AvailableCommand,
 } from '@agentclientprotocol/sdk';
 import type { AskUserQuestionRequest } from '../../types/acpTypes.js';
 import type {
@@ -46,6 +47,8 @@ export class WebViewProvider {
   // Track current ACP mode id to influence permission/diff behavior
   private currentModeId: ApprovalModeValue | null = null;
   private authState: boolean | null = null;
+  /** Cached available commands for re-sending on webview ready */
+  private cachedAvailableCommands: AvailableCommand[] | null = null;
   /** Cached available models for re-sending on webview ready */
   private cachedAvailableModels: ModelInfo[] | null = null;
   /** Model to apply once a new editor-tab session is initialized */
@@ -190,6 +193,7 @@ export class WebViewProvider {
 
     // Surface available commands (from ACP available_commands_update)
     this.agentManager.onAvailableCommands((commands) => {
+      this.cachedAvailableCommands = commands;
       this.sendMessageToWebView({
         type: 'availableCommands',
         data: { commands },
@@ -1255,6 +1259,13 @@ export class WebViewProvider {
       this.sendMessageToWebView({
         type: 'modeChanged',
         data: { modeId: this.currentModeId },
+      });
+    }
+
+    if (this.cachedAvailableCommands) {
+      this.sendMessageToWebView({
+        type: 'availableCommands',
+        data: { commands: this.cachedAvailableCommands },
       });
     }
 

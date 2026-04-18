@@ -58,6 +58,10 @@ import type { ModelInfo, AvailableCommand } from '@agentclientprotocol/sdk';
 import type { Question } from '../types/acpTypes.js';
 import { useImagePaste, type WebViewImageMessage } from './hooks/useImage.js';
 import { computeContextUsage } from './utils/contextUsage.js';
+import {
+  buildSlashCommandItems,
+  isExpandableSlashCommand,
+} from './utils/slashCommandUtils.js';
 
 export const App: React.FC = () => {
   const vscode = useVSCode();
@@ -183,16 +187,9 @@ export const App: React.FC = () => {
           },
         ];
 
-        // Slash Commands group - commands from server (available_commands_update)
-        const slashCommandItems: CompletionItem[] = availableCommands.map(
-          (cmd) => ({
-            id: cmd.name,
-            label: `/${cmd.name}`,
-            description: cmd.description,
-            type: 'command' as const,
-            group: 'Slash Commands',
-            value: cmd.name,
-          }),
+        const slashCommandItems = buildSlashCommandItems(
+          query,
+          availableCommands,
         );
 
         // Combine all commands
@@ -203,12 +200,11 @@ export const App: React.FC = () => {
         ];
 
         // Filter by query
-        const lowerQuery = query.toLowerCase();
         return allCommands.filter(
           (cmd) =>
-            cmd.label.toLowerCase().includes(lowerQuery) ||
+            cmd.label.toLowerCase().includes(query.toLowerCase()) ||
             (cmd.description &&
-              cmd.description.toLowerCase().includes(lowerQuery)),
+              cmd.description.toLowerCase().includes(query.toLowerCase())),
         );
       }
     },
@@ -607,7 +603,11 @@ export const App: React.FC = () => {
         // Skip when fillOnly (Tab) — let the generic insertion path fill the
         // command text so the user can keep typing arguments.
         const serverCmd = availableCommands.find((c) => c.name === itemId);
-        if (serverCmd && !fillOnly) {
+        if (
+          serverCmd &&
+          !fillOnly &&
+          !isExpandableSlashCommand(serverCmd.name)
+        ) {
           // Clear the trigger text since we're sending the command
           clearTriggerText();
           // Send the slash command as a user message
@@ -699,6 +699,17 @@ export const App: React.FC = () => {
         newRange.collapse(false);
         sel?.removeAllRanges();
         sel?.addRange(newRange);
+
+        if (
+          completion.triggerChar === '/' &&
+          isExpandableSlashCommand(insertValue.trim())
+        ) {
+          completion.closeCompletion();
+          requestAnimationFrame(() => {
+            inputElement.dispatchEvent(new Event('input', { bubbles: true }));
+          });
+          return;
+        }
       }
 
       // Close the completion menu

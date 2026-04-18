@@ -302,6 +302,85 @@ describe('WebViewProvider.attachToView', () => {
     });
     expect(panelPostMessage).not.toHaveBeenCalled();
   });
+
+  it('re-sends cached available commands after webviewReady', async () => {
+    let messageHandler:
+      | ((message: { type: string; data?: unknown }) => Promise<void>)
+      | undefined;
+
+    const postMessage = vi.fn();
+    const webview = {
+      options: undefined as unknown,
+      html: '',
+      postMessage,
+      asWebviewUri: vi.fn((uri: { fsPath: string }) => ({
+        toString: () => `webview:${uri.fsPath}`,
+      })),
+      onDidReceiveMessage: vi.fn(
+        (
+          handler: (message: { type: string; data?: unknown }) => Promise<void>,
+        ) => {
+          messageHandler = handler;
+          return { dispose: vi.fn() };
+        },
+      ),
+    };
+
+    const provider = new WebViewProvider(
+      { subscriptions: [] } as never,
+      { fsPath: '/extension-root' } as never,
+    );
+
+    const agentManager = (
+      provider as unknown as {
+        agentManager: {
+          onAvailableCommands: ReturnType<typeof vi.fn>;
+        };
+      }
+    ).agentManager;
+
+    await provider.attachToView(
+      {
+        webview,
+        visible: true,
+        onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
+        onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
+      } as never,
+      'qwen-code.chatView.sidebar',
+    );
+
+    const onAvailableCommands = agentManager.onAvailableCommands.mock
+      .calls[0]?.[0] as ((commands: unknown[]) => void) | undefined;
+
+    expect(onAvailableCommands).toBeTypeOf('function');
+
+    onAvailableCommands?.([
+      {
+        name: 'export',
+        description: 'Export current session',
+        input: null,
+      },
+    ]);
+
+    postMessage.mockClear();
+
+    await messageHandler?.({
+      type: 'webviewReady',
+    });
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'availableCommands',
+      data: {
+        commands: [
+          {
+            name: 'export',
+            description: 'Export current session',
+            input: null,
+          },
+        ],
+      },
+    });
+  });
 });
 
 describe('WebViewProvider.createNewSession', () => {
