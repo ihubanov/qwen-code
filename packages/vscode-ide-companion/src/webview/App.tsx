@@ -641,7 +641,7 @@ export const App: React.FC = () => {
         if (itemId === 'account') {
           clearTriggerText();
           vscode.postMessage({ type: 'getAccountInfo', data: {} });
-          completion.closeCompletion();
+          closeCompletion();
           return;
         }
 
@@ -658,7 +658,10 @@ export const App: React.FC = () => {
         // Special case: /skills always uses fill behavior (Enter = Tab) to
         // allow the secondary skill picker to appear.
         const serverCmd = availableCommands.find((c) => c.name === itemId);
-        const isSkillsCmd = shouldOpenSkillsSecondaryPicker(item);
+        const isSkillsCmd = shouldOpenSkillsSecondaryPicker(
+          item,
+          availableSkills,
+        );
         if (serverCmd && !fillOnly && !isSkillsCmd) {
           // Clear the trigger text since we're sending the command
           clearTriggerText();
@@ -768,7 +771,7 @@ export const App: React.FC = () => {
         sel?.removeAllRanges();
         sel?.addRange(newRange);
 
-        if (shouldOpenSkillsSecondaryPicker(item)) {
+        if (shouldOpenSkillsSecondaryPicker(item, availableSkills)) {
           const rangeRect = newRange.getBoundingClientRect();
           const inputRect = inputElement.getBoundingClientRect();
           const position =
@@ -786,6 +789,7 @@ export const App: React.FC = () => {
     },
     [
       availableCommands,
+      availableSkills,
       closeCompletion,
       completionTriggerChar,
       fileContext,
